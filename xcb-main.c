@@ -3,14 +3,20 @@
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <unistd.h>
+#include <inttypes.h>
 
+#define bin( x ) for (int i = sizeof(x) * 8; i >= 0; i--) { \
+        printf("%d", (x >> i) & 1); \
+        if (i % 4 == 0 && i != 0) printf(" "); \
+        } \
+        printf("\n"); \
 
 /*
  *  https://xcb.freedesktop.org/tutorial/basicwindowsanddrawing/
  */
 
-static const int winw = 500;
-static const int winh= 500;
+static const int winw = 1920;
+static const int winh= 1080;
 static const int sx = 0;
 static const int sy = 0;
 static const int borderpx = 10;
@@ -35,7 +41,14 @@ int main(int argc, char **argv){
   //Reassign win to be a new win
   win = xcb_generate_id(conn);
   uint32_t winmask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-  uint32_t winvalues[2] = { screen->black_pixel, XCB_EVENT_MASK_EXPOSURE};
+  uint32_t winvalues[2] = { screen->black_pixel, 
+      XCB_EVENT_MASK_EXPOSURE |
+      XCB_EVENT_MASK_VISIBILITY_CHANGE |
+      XCB_EVENT_MASK_BUTTON_PRESS |
+      XCB_EVENT_MASK_BUTTON_RELEASE |
+      XCB_EVENT_MASK_KEY_PRESS | 
+      XCB_EVENT_MASK_KEY_RELEASE
+  };
 
 
   xcb_create_window(
@@ -55,23 +68,46 @@ int main(int argc, char **argv){
     .x = 0,
     .y = 0,
     .width = winw,
-    .height = winh
+    .height = winh/2
   };
   xcb_rectangle_t rects[] = {rect_1};
   xcb_generic_event_t *ev;
+  // Blocking way, alternatively may use xcb_poll_for_event(conn)
+  // This one returns an event or NULL if no event. 
   while((ev = xcb_wait_for_event(conn)) != NULL){
+//    printf("ev->response_type :");
+//    bin(ev->response_type);
+    /*
+     * strips leading 1 in 1000.1100
+     *leading 1 means another client sent this msg?
+     *a 0 means it came from the x server
+    */
     switch(ev->response_type & ~0x80){
       case XCB_EXPOSE:
-        printf("xcb_expose ev\n");
         xcb_poly_fill_rectangle(conn,
             win,
             white_gc,
             1,
             rects
             );
-        xcb_flush(conn);
         break;
+      case XCB_KEY_PRESS:
+      case XCB_KEY_RELEASE: {
+                              xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
+                              printf("%u\n", k->detail);
+                              break;
+                            }
+      case XCB_BUTTON_PRESS: {
+                               xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
+                               printf("button pushed @ {%d, %d}\n", b->event_x, b->event_y);
+                             }
+      case XCB_BUTTON_RELEASE: {
+                               xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
+                               printf("button released @ {%d, %d}\n", b->event_x, b->event_y);
+                             }
+
     }
+    xcb_flush(conn);
     free(ev);
   }
   xcb_disconnect(conn);
