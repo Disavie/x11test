@@ -16,10 +16,13 @@
         } \
         printf("\n"); \
 
+#define MARGIN 25
+
 /*
  *  https://xcb.freedesktop.org/tutorial/basicwindowsanddrawing/
  */
 
+void update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle_t *rect);
 xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname);
 void check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char * errstr);
 
@@ -93,6 +96,7 @@ int main(int argc, char **argv){
     free(err);
     exit(EXIT_FAILURE);
   }
+  free(wa_reply);
   xcb_get_geometry_cookie_t geo_cookie = xcb_get_geometry(conn, win);
   xcb_get_geometry_reply_t *g_reply = xcb_get_geometry_reply(conn, geo_cookie, &err);
   if(err != NULL){
@@ -103,13 +107,13 @@ int main(int argc, char **argv){
   winw = g_reply->width;
   winh = g_reply->height;
 
-
+  free(g_reply);
   xcb_map_window(conn, win);
   xcb_flush(conn);
 
   xcb_rectangle_t rect_1 = {
-    .x = 25,
-    .y = 25,
+    .x = MARGIN,
+    .y = MARGIN,
     .width = winw - rect_1.x,
     .height = winh - rect_1.y
   };
@@ -129,6 +133,10 @@ int main(int argc, char **argv){
     */
     switch(ev->response_type & ~0x80){
       case XCB_EXPOSE:
+        //Redraw everything, clear first
+        xcb_clear_area(conn, 0, win, 0, 0, winw, winh);
+        update_rects_geometry(conn, &win, &rects[0]);
+        printf("real: %d : %d\n", rects[0].width, rects[0].height);
         xcb_poly_fill_rectangle(conn,
             win,
             white_gc,
@@ -184,6 +192,24 @@ post_event_loop:
   xcb_disconnect(conn);
 
   return EXIT_SUCCESS;
+}
+
+void
+update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle_t *rect){
+  
+  xcb_generic_error_t *err;
+  xcb_get_geometry_cookie_t geo_cookie = xcb_get_geometry(conn, *win);
+  xcb_get_geometry_reply_t *g_reply = xcb_get_geometry_reply(conn, geo_cookie, &err);
+  if(err != NULL){
+    fprintf(stderr, "get_geometry: %d", err->error_code);
+    free(err);
+    exit(EXIT_FAILURE);
+  }
+  
+  rect->width = g_reply->width - (2*MARGIN);
+  rect->height = g_reply->height - (2*MARGIN);
+  free(g_reply);
+  printf("%d : %d\n", rect->width, rect->height);
 }
 
 xcb_gcontext_t
