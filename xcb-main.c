@@ -28,18 +28,14 @@
  */
 static inline int min(int a, int b){ return a < b ? a : b; }
 
-struct m_point {
-  long x;
-  long y;
-};
 struct m_point_arr {
   int cap;
   int idx;
-  struct m_point *elems;
+  struct xcb_point_t *elems;
 };
 
 void free_point_arr(struct m_point_arr *points);
-void push_point(struct m_point_arr *points, struct m_point point);
+void push_point(struct m_point_arr *points, struct xcb_point_t point);
 void update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle_t *rect);
 xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname);
 void check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char * errstr);
@@ -146,9 +142,9 @@ int main(int argc, char **argv){
   struct m_point_arr points = {
     .cap = 1,
     .idx = 0,
-    .elems =  (struct m_point *)malloc(sizeof(struct m_point) * points.cap)
+    .elems =  (xcb_point_t *)malloc(sizeof(xcb_point_t) * points.cap)
   };
-  memset(points.elems, 0, sizeof(struct m_point) * points.cap);
+  memset(points.elems, 0, sizeof(xcb_point_t) * points.cap);
 
 
   while((ev = xcb_wait_for_event(conn)) != NULL){
@@ -162,8 +158,8 @@ int main(int argc, char **argv){
     switch(ev->response_type & ~0x80){
       case XCB_EXPOSE:
         for(int i = 0; i < points.cap; i++){
-            struct m_point p = points.elems[i];
-            fprintf(stdout, "p%d: %ld, %ld \n", i, p.x, p.y);
+             xcb_point_t p = points.elems[i];
+            fprintf(stdout, "p%d: %d, %d\n", i, p.x, p.y);
         }
         //Redraw everything, clear first
         xcb_clear_area(conn, 0, win, 0, 0, winw, winh);
@@ -177,6 +173,19 @@ int main(int argc, char **argv){
         const char * text = "Hello world! Space to toggle visibility, <ESC> to exit";
         xcb_cookie = xcb_image_text_8_checked(conn, strlen(text), win, fontgc, 0, 12, text);
         check_xcb_cookie(conn, xcb_cookie, "drawing text");
+
+
+        // xcb_void_cookie_t xcb_poly_line (xcb_connection_t  *c,               /* The connection to the X server */
+        //     uint8_t            coordinate_mode, /* Coordinate mode, usually set to XCB_COORD_MODE_ORIGIN */
+        //     xcb_drawable_t     drawable,        /* The drawable on which we want to draw the line(s) */
+        //     xcb_gcontext_t     gc,              /* The Graphic Context we use to draw the line(s) */
+        //     uint32_t           points_len,      /* The number of points in the polygonal line */
+        //     const xcb_point_t *points );        /* An array of points */#!/usr/bin/bash
+
+
+
+
+
         break;
       case XCB_KEY_PRESS:{
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
@@ -205,7 +214,7 @@ int main(int argc, char **argv){
       case XCB_BUTTON_PRESS: {
                                xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
                                printf("button pushed @ {%d, %d}\n", b->event_x, b->event_y);
-                               struct m_point point = {b->event, b->event_y};
+                               xcb_point_t point = {b->event, b->event_y};
                                push_point(&points, point);
                                break;
                              }
@@ -237,11 +246,11 @@ free_point_arr(struct m_point_arr *points){
 }
 
 void
-push_point(struct m_point_arr *points, struct m_point point){
+push_point(struct m_point_arr *points,  xcb_point_t point){
   points->elems[points->idx] = point;
   points->idx++;
   if (points->idx >= points->cap){
-    points->elems = realloc(points->elems, sizeof(struct m_point) * (points->cap*=2));
+    points->elems = realloc(points->elems, sizeof( xcb_point_t) * (points->cap*=2));
   }
 }
 
