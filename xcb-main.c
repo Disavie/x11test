@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -40,8 +41,9 @@ struct m_point_arr {
 void free_point_arr(struct m_point_arr *points);
 void push_point(struct m_point_arr *points, struct xcb_point_t point);
 void update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle_t *rect);
-xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname);
+xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname, uint32_t col);
 void check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char * errstr);
+void sprintscr(xcb_connection_t *conn, xcb_drawable_t *win, xcb_gcontext_t *fontgc, int startx, int starty, const char *text);
 
 static int winw = 1920;
 static int winh= 1080;
@@ -110,14 +112,6 @@ int main(int argc, char **argv){
       winname
       );
   xcb_generic_error_t *err;
-  xcb_get_window_attributes_cookie_t wa_cookie = xcb_get_window_attributes(conn, win);
-  xcb_get_window_attributes_reply_t *wa_reply = xcb_get_window_attributes_reply(conn, wa_cookie, &err);
-  if(err != NULL){
-    fprintf(stderr, "window_attributes: %d", err->error_code);
-    free(err);
-    exit(EXIT_FAILURE);
-  }
-  free(wa_reply);
   xcb_get_geometry_cookie_t geo_cookie = xcb_get_geometry(conn, win);
   xcb_get_geometry_reply_t *g_reply = xcb_get_geometry_reply(conn, geo_cookie, &err);
   if(err != NULL){
@@ -144,7 +138,8 @@ int main(int argc, char **argv){
   // Blocking way, alternatively may use xcb_poll_for_event(conn)
   // This one returns an event or NULL if no event. 
   int is_hidden = 0;
-  xcb_gcontext_t fontgc = init_xcb_font_gc(conn, &win, fname);
+  xcb_gcontext_t fontgc = init_xcb_font_gc(conn, &win, fname, 0xFFFFFF);
+  xcb_gcontext_t fontgc_black = init_xcb_font_gc(conn, &win, fname, 0x0);
 
   struct m_point_arr points = {
     .cap = 1,
@@ -153,23 +148,20 @@ int main(int argc, char **argv){
   };
   memset(points.elems, 0, sizeof(xcb_point_t) * points.cap);
 
-
+  char buf[512];
+  int buf_idx = 0;
   while((ev = xcb_wait_for_event(conn)) != NULL){
+    //printf("Recived event\n");
     /*
      * strips leading 1 in 1000.1100
      *leading 1 means another client sent this msg?
      *a 0 means it came from the x server
     */
 
-    // xcb_void_cookie_t xcb_poly_line(
-    //     xcb_connection_t  *c,               /* The connection to the X server */
-    //     uint8_t            coordinate_mode, /* Coordinate mode, usually set to XCB_COORD_MODE_ORIGIN */
-    //     xcb_drawable_t     drawable,        /* The drawable on which we want to draw the line(s) */
-    //     xcb_gcontext_t     gc,              /* The Graphic Context we use to draw the line(s) */
-    //     uint32_t           points_len,      /* The number of points in the polygonal line */
-    //     const xcb_point_t *points );        /* An array of points */#!/usr/bin/bash
     xcb_cookie = xcb_poly_line(conn, XCB_COORD_MODE_ORIGIN, win, black_gc, points.idx, points.elems);
     check_xcb_cookie(conn, xcb_cookie, "poly_line: ");
+    //To Do: is there some function to get height/width of font characters?
+    sprintscr(conn, &win, &fontgc_black, MARGIN, MARGIN + 8 + 2, buf);  // < 8 is height of this font I'm using at least right now, added 2 for padding
     switch(ev->response_type & ~0x80){
       case XCB_EXPOSE:
         for(int i = 0; i < points.idx; i++){
@@ -203,7 +195,8 @@ int main(int argc, char **argv){
                                   */
                               xcb_keysym_t sym = xcb_key_press_lookup_keysym(syms, k, 0);
                               printf("%c",sym);
-                              if(sym == '\r') { // < For some reason the \n keycode translates to \r? Maybe its translating to \r\n but I'm only reading one of them
+                              buf[buf_idx++] = sym;
+                              if((char)sym == '\r') { // < For some reason the \n keycode translates to \r? Maybe its translating to \r\n but I'm only reading one of them
                                 printf("\n");
                                 fflush(stdout);
                               }
@@ -211,6 +204,7 @@ int main(int argc, char **argv){
                                 case 9: // < esc
                                   free(ev);
                                   goto post_event_loop;
+                                /*
                                 case 65: // < space, this works but how am i supposed to send a keypress event to the hidden window lol
                                   if(is_hidden){
                                     is_hidden = 0;
@@ -219,8 +213,8 @@ int main(int argc, char **argv){
                                     is_hidden = 1;
                                     xcb_map_window(conn, win);
                                   }
+                                  */
                               }
-                                  break;
                               printf("pressed: %d\n", k->detail);
                               break;
                          }
@@ -251,6 +245,8 @@ post_event_loop:
   xcb_cookie = xcb_free_gc_checked(conn, white_gc);
   check_xcb_cookie(conn, xcb_cookie, "freeing white_gc");
   xcb_cookie = xcb_free_gc_checked(conn, fontgc);
+  check_xcb_cookie(conn, xcb_cookie, "freeing font gc");
+  xcb_cookie = xcb_free_gc_checked(conn, fontgc_black);
   check_xcb_cookie(conn, xcb_cookie, "freeing font gc");
   xcb_disconnect(conn);
 
@@ -289,8 +285,32 @@ update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle
   free(g_reply);
 }
 
+void
+sprintscr(xcb_connection_t *conn,
+    xcb_drawable_t *win,
+    xcb_gcontext_t *fontgc,
+    int startx,
+    int starty,
+    const char *text) {
+  if (strlen(text) == 0 ){
+    return;
+  }
+  char * textcpy = strdup(text);
+  int LINEHEIGHT = 8 + 2; //temporary hardcoded
+  char *line = strtok(textcpy, "\n\r");
+  while(line != NULL){
+    xcb_cookie = xcb_image_text_8_checked(conn, strlen(line), *win, *fontgc, startx, starty, line);
+    check_xcb_cookie(conn, xcb_cookie, "drawing text");
+    starty+=LINEHEIGHT;
+    line = strtok(NULL, "\n\r");
+  }
+  free(textcpy);
+}
+
+
 xcb_gcontext_t
-init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *font_name){
+init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *font_name, uint32_t col){
+
   const xcb_setup_t *setup = xcb_get_setup(conn);
   xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
   xcb_screen_t *screen = iter.data;
