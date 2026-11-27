@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <xcb/xcb.h>
-#include <xcb/xproto.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <string.h>
+
+#include <xcb/xcb.h>
+#include <xcb/xproto.h>
+#include <xcb/xcb_errors.h>
 
 #define bin( x ) for (int i = sizeof(x) * 8; i >= 0; i--) { \
         printf("%d", (x >> i) & 1); \
@@ -15,11 +18,17 @@
  *  https://xcb.freedesktop.org/tutorial/basicwindowsanddrawing/
  */
 
+xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname);
+void check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char * errstr);
+
 static const int winw = 1920;
 static const int winh= 1080;
 static const int sx = 0;
 static const int sy = 0;
 static const int borderpx = 10;
+static const char * fname = "lucidasanstypewriter-8";
+static xcb_void_cookie_t xcb_cookie;
+
 
 int main(int argc, char **argv){
   xcb_connection_t *conn = xcb_connect(NULL, NULL);
@@ -31,12 +40,15 @@ int main(int argc, char **argv){
   const xcb_setup_t *setup = xcb_get_setup(conn);
   xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
   xcb_screen_t *screen = iter.data;
+
   //GC is created on the root
   xcb_drawable_t win = screen->root;
+
   xcb_gcontext_t white_gc = xcb_generate_id(conn); 
   uint32_t gcmask = XCB_GC_FOREGROUND | XCB_GC_GRAPHICS_EXPOSURES;
   uint32_t gcvalues[2] = { screen->white_pixel, 0};
   xcb_create_gc(conn, white_gc, win, gcmask, gcvalues);
+  
 
   //Reassign win to be a new win
   win = xcb_generate_id(conn);
@@ -49,7 +61,6 @@ int main(int argc, char **argv){
       XCB_EVENT_MASK_KEY_PRESS | 
       XCB_EVENT_MASK_KEY_RELEASE
   };
-
 
   xcb_create_window(
       conn, XCB_COPY_FROM_PARENT,
@@ -90,6 +101,12 @@ int main(int argc, char **argv){
             1,
             rects
             );
+        const char * text = "Hello world!";
+        xcb_gcontext_t fontgc = init_xcb_font_gc(conn, &win, fname);
+        xcb_cookie = xcb_image_text_8_checked(conn, strlen(text), win, fontgc, 0, 12, text);
+        check_xcb_cookie(conn, xcb_cookie, "drawing text");
+        xcb_cookie = xcb_free_gc_checked(conn, fontgc);
+        check_xcb_cookie(conn, xcb_cookie, "freeing font gc");
         break;
       case XCB_KEY_PRESS:
       case XCB_KEY_RELEASE: {
@@ -110,7 +127,38 @@ int main(int argc, char **argv){
     xcb_flush(conn);
     free(ev);
   }
+  xcb_cookie = xcb_free_gc_checked(conn, white_gc);
+  check_xcb_cookie(conn, xcb_cookie, "freeing white_gc");
   xcb_disconnect(conn);
 
   return EXIT_SUCCESS;
+}
+
+xcb_gcontext_t
+init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *font_name){
+  const xcb_setup_t *setup = xcb_get_setup(conn);
+  xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
+  xcb_screen_t *screen = iter.data;
+  //Open a a font
+  // Adding XBC_GC_FONT to the gc's valuemask allows it to draw fonts
+  xcb_font_t f = xcb_generate_id(conn);
+  xcb_cookie = xcb_open_font_checked(conn, f, strlen(font_name), font_name);
+  check_xcb_cookie(conn, xcb_cookie, "opening font");
+
+  xcb_gcontext_t fontgc = xcb_generate_id(conn); 
+  uint32_t gcmask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT;
+  uint32_t gcvalues[3] = { screen->black_pixel, screen->white_pixel , f};
+  xcb_cookie = xcb_create_gc_checked(conn, fontgc, *win, gcmask, gcvalues);
+  check_xcb_cookie(conn, xcb_cookie, "create gc");
+  xcb_close_font(conn, f);
+  return fontgc;
+}
+
+void
+check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char *errstr){
+  xcb_generic_error_t *err = xcb_request_check(conn, c);
+    if(err){
+      fprintf(stderr, "error: %u @ %s\n", err->error_code, errstr);
+      exit(EXIT_FAILURE);
+    }
 }
