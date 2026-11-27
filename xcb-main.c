@@ -10,18 +10,36 @@
 #include <xcb/xproto.h>
 #include <xcb/xcb_errors.h>
 
-#define bin( x ) for (int i = sizeof(x) * 8; i >= 0; i--) { \
-        printf("%d", (x >> i) & 1); \
-        if (i % 4 == 0 && i != 0) printf(" "); \
-        } \
-        printf("\n"); \
+#define bin( x ) do{ \
+  printf("%d", (x >> i) & 1); \
+  for (int i = sizeof(x) * 8; i >= 0; i--) { \
+    if (i % 4 == 0 && i != 0) printf(" "); \
+  } \
+  printf("\n"); \
+  while(0); \
+
+#define ARR_LEN(x) sizeof(x) / sizeof(x[0]);
 
 #define MARGIN 25
+#define NULL_POINT {-1, -1}
 
 /*
  *  https://xcb.freedesktop.org/tutorial/basicwindowsanddrawing/
  */
+static inline int min(int a, int b){ return a < b ? a : b; }
 
+struct m_point {
+  long x;
+  long y;
+};
+struct m_point_arr {
+  int cap;
+  int idx;
+  struct m_point *elems;
+};
+
+void free_point_arr(struct m_point_arr *points);
+void push_point(struct m_point_arr *points, struct m_point point);
 void update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle_t *rect);
 xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname);
 void check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char * errstr);
@@ -124,6 +142,15 @@ int main(int argc, char **argv){
   // This one returns an event or NULL if no event. 
   int is_hidden = 0;
   xcb_gcontext_t fontgc = init_xcb_font_gc(conn, &win, fname);
+
+  struct m_point_arr points = {
+    .cap = 1,
+    .idx = 0,
+    .elems =  (struct m_point *)malloc(sizeof(struct m_point) * points.cap)
+  };
+  memset(points.elems, 0, sizeof(struct m_point) * points.cap);
+
+
   while((ev = xcb_wait_for_event(conn)) != NULL){
 //    printf("ev->response_type :");
 //    bin(ev->response_type);
@@ -134,6 +161,10 @@ int main(int argc, char **argv){
     */
     switch(ev->response_type & ~0x80){
       case XCB_EXPOSE:
+        for(int i = 0; i < points.cap; i++){
+            struct m_point p = points.elems[i];
+            fprintf(stdout, "p%d: %ld, %ld \n", i, p.x, p.y);
+        }
         //Redraw everything, clear first
         xcb_clear_area(conn, 0, win, 0, 0, winw, winh);
         update_rects_geometry(conn, &win, &rects[0]);
@@ -174,10 +205,14 @@ int main(int argc, char **argv){
       case XCB_BUTTON_PRESS: {
                                xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
                                printf("button pushed @ {%d, %d}\n", b->event_x, b->event_y);
+                               struct m_point point = {b->event, b->event_y};
+                               push_point(&points, point);
+                               break;
                              }
       case XCB_BUTTON_RELEASE: {
                                xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
                                printf("button released @ {%d, %d}\n", b->event_x, b->event_y);
+                               break;
                              }
 
     }
@@ -185,6 +220,7 @@ int main(int argc, char **argv){
     free(ev);
   }
 post_event_loop:
+  free_point_arr(&points);
   xcb_cookie = xcb_free_gc_checked(conn, white_gc);
   check_xcb_cookie(conn, xcb_cookie, "freeing white_gc");
   xcb_cookie = xcb_free_gc_checked(conn, fontgc);
@@ -192,6 +228,21 @@ post_event_loop:
   xcb_disconnect(conn);
 
   return EXIT_SUCCESS;
+}
+
+
+void //?
+free_point_arr(struct m_point_arr *points){
+    free(points->elems);
+}
+
+void
+push_point(struct m_point_arr *points, struct m_point point){
+  points->elems[points->idx] = point;
+  points->idx++;
+  if (points->idx >= points->cap){
+    points->elems = realloc(points->elems, sizeof(struct m_point) * (points->cap*=2));
+  }
 }
 
 void
