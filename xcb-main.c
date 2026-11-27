@@ -9,6 +9,9 @@
 #include <xcb/xcb_atom.h>
 #include <xcb/xproto.h>
 #include <xcb/xcb_errors.h>
+//#include <X11/keysym.h>
+#include <xcb/xcb_keysyms.h>
+
 
 #define bin( x ) do{ \
   printf("%d", (x >> i) & 1); \
@@ -58,6 +61,7 @@ int main(int argc, char **argv){
     exit(EXIT_FAILURE);
   }
 
+  xcb_key_symbols_t * syms = xcb_key_symbols_alloc(conn);
   const xcb_setup_t *setup = xcb_get_setup(conn);
   xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
   xcb_screen_t *screen = iter.data;
@@ -192,6 +196,17 @@ int main(int argc, char **argv){
         break;
       case XCB_KEY_PRESS:{
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
+                              /*
+                              xcb_keysym_t      xcb_key_press_lookup_keysym   (xcb_key_symbols_t         *syms,
+                                  xcb_key_press_event_t      *event,
+                                  int                    col);
+                                  */
+                              xcb_keysym_t sym = xcb_key_press_lookup_keysym(syms, k, 0);
+                              printf("%c",sym);
+                              if(sym == '\r') { // < For some reason the \n keycode translates to \r? Maybe its translating to \r\n but I'm only reading one of them
+                                printf("\n");
+                                fflush(stdout);
+                              }
                               switch (k->detail){ 
                                 case 9: // < esc
                                   free(ev);
@@ -211,7 +226,6 @@ int main(int argc, char **argv){
                          }
       case XCB_KEY_RELEASE: {
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
-                              printf("released: %d\n", k->detail);
                               break;
                             }
       case XCB_BUTTON_PRESS: {
@@ -232,6 +246,7 @@ int main(int argc, char **argv){
     free(ev);
   }
 post_event_loop:
+  xcb_key_symbols_free(syms);
   free_point_arr(&points);
   xcb_cookie = xcb_free_gc_checked(conn, white_gc);
   check_xcb_cookie(conn, xcb_cookie, "freeing white_gc");
