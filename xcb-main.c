@@ -123,6 +123,7 @@ int main(int argc, char **argv){
   // Blocking way, alternatively may use xcb_poll_for_event(conn)
   // This one returns an event or NULL if no event. 
   int is_hidden = 0;
+  xcb_gcontext_t fontgc = init_xcb_font_gc(conn, &win, fname);
   while((ev = xcb_wait_for_event(conn)) != NULL){
 //    printf("ev->response_type :");
 //    bin(ev->response_type);
@@ -136,7 +137,6 @@ int main(int argc, char **argv){
         //Redraw everything, clear first
         xcb_clear_area(conn, 0, win, 0, 0, winw, winh);
         update_rects_geometry(conn, &win, &rects[0]);
-        printf("real: %d : %d\n", rects[0].width, rects[0].height);
         xcb_poly_fill_rectangle(conn,
             win,
             white_gc,
@@ -144,16 +144,14 @@ int main(int argc, char **argv){
             rects
             );
         const char * text = "Hello world! Space to toggle visibility, <ESC> to exit";
-        xcb_gcontext_t fontgc = init_xcb_font_gc(conn, &win, fname);
         xcb_cookie = xcb_image_text_8_checked(conn, strlen(text), win, fontgc, 0, 12, text);
         check_xcb_cookie(conn, xcb_cookie, "drawing text");
-        xcb_cookie = xcb_free_gc_checked(conn, fontgc);
-        check_xcb_cookie(conn, xcb_cookie, "freeing font gc");
         break;
       case XCB_KEY_PRESS:{
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
                               switch (k->detail){ 
                                 case 9: // < esc
+                                  free(ev);
                                   goto post_event_loop;
                                 case 65: // < space, this works but how am i supposed to send a keypress event to the hidden window lol
                                   if(is_hidden){
@@ -171,6 +169,7 @@ int main(int argc, char **argv){
       case XCB_KEY_RELEASE: {
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
                               printf("released: %d\n", k->detail);
+                              free(k);
                               break;
                             }
       case XCB_BUTTON_PRESS: {
@@ -189,6 +188,8 @@ int main(int argc, char **argv){
 post_event_loop:
   xcb_cookie = xcb_free_gc_checked(conn, white_gc);
   check_xcb_cookie(conn, xcb_cookie, "freeing white_gc");
+  xcb_cookie = xcb_free_gc_checked(conn, fontgc);
+  check_xcb_cookie(conn, xcb_cookie, "freeing font gc");
   xcb_disconnect(conn);
 
   return EXIT_SUCCESS;
@@ -207,9 +208,8 @@ update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle
   }
   
   rect->width = g_reply->width - (2*MARGIN);
-  rect->height = g_reply->height - (2*MARGIN);
+  rect->height = g_reply->height -(2*MARGIN);
   free(g_reply);
-  printf("%d : %d\n", rect->width, rect->height);
 }
 
 xcb_gcontext_t
