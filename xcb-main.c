@@ -26,6 +26,7 @@ static const int winh= 1080;
 static const int sx = 0;
 static const int sy = 0;
 static const int borderpx = 10;
+//Available fonts, check xlsfonts
 static const char * fname = "lucidasanstypewriter-8";
 static xcb_void_cookie_t xcb_cookie;
 
