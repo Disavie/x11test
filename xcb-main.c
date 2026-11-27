@@ -169,7 +169,6 @@ int main(int argc, char **argv){
       case XCB_KEY_RELEASE: {
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
                               printf("released: %d\n", k->detail);
-                              free(k);
                               break;
                             }
       case XCB_BUTTON_PRESS: {
