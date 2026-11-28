@@ -38,12 +38,19 @@ struct m_point_arr {
   struct xcb_point_t *elems;
 };
 
+typedef struct{
+  int x;
+  int y;
+}Cursor_t;
+
+
 void free_point_arr(struct m_point_arr *points);
 void push_point(struct m_point_arr *points, struct xcb_point_t point);
 void update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle_t *rect);
 xcb_gcontext_t init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *fname, uint32_t col);
 void check_xcb_cookie(xcb_connection_t *conn, xcb_void_cookie_t c, const char * errstr);
 void sprintscr(xcb_connection_t *conn, xcb_drawable_t *win, xcb_gcontext_t *fontgc, int startx, int starty, const char *text);
+void cprintscr(xcb_connection_t *conn, xcb_drawable_t *win, xcb_gcontext_t *fontgc, const char c);
 
 static int winw = 1920;
 static int winh= 1080;
@@ -54,10 +61,6 @@ static const int borderpx = 10;
 static const char *fname = "lucidasanstypewriter-8";
 static xcb_void_cookie_t xcb_cookie;
 static const char *winname = "poop window";
-typedef struct{
-  int x;
-  int y;
-}Cursor_t;
 
 static Cursor_t cursor = {
   .x = MARGIN,
@@ -94,7 +97,7 @@ int main(int argc, char **argv){
   uint32_t winvalues[2] = { screen->black_pixel, 
       XCB_EVENT_MASK_EXPOSURE |
       XCB_EVENT_MASK_VISIBILITY_CHANGE |
-      XCB_EVENT_MASK_RESIZE_REDIRECT |
+      //XCB_EVENT_MASK_RESIZE_REDIRECT |
       XCB_EVENT_MASK_BUTTON_PRESS |
       XCB_EVENT_MASK_BUTTON_RELEASE |
       XCB_EVENT_MASK_KEY_PRESS | 
@@ -157,10 +160,7 @@ int main(int argc, char **argv){
   };
   memset(points.elems, 0, sizeof(xcb_point_t) * points.cap);
 
-  char buf[512];
-  int buf_idx = 0;
   while((ev = xcb_wait_for_event(conn)) != NULL){
-    //printf("Recived event\n");
     /*
      * strips leading 1 in 1000.1100
      *leading 1 means another client sent this msg?
@@ -169,8 +169,6 @@ int main(int argc, char **argv){
 
     xcb_cookie = xcb_poly_line(conn, XCB_COORD_MODE_ORIGIN, win, black_gc, points.idx, points.elems);
     check_xcb_cookie(conn, xcb_cookie, "poly_line: ");
-    //To Do: is there some function to get height/width of font characters?
-    sprintscr(conn, &win, &fontgc_black, MARGIN, MARGIN + 8 + 2, buf);  // < 8 is height of this font I'm using at least right now, added 2 for padding
     switch(ev->response_type & ~0x80){
       case XCB_EXPOSE:
         for(int i = 0; i < points.idx; i++){
@@ -186,40 +184,19 @@ int main(int argc, char **argv){
             1,
             rects
             );
-        const char * text = "Hello world! Space to toggle visibility, <ESC> to exit";
+        const char * text = "Hello world! <ESC> to exit";
         xcb_cookie = xcb_image_text_8_checked(conn, strlen(text), win, fontgc, 0, 12, text);
         check_xcb_cookie(conn, xcb_cookie, "drawing text");
         break;
       case XCB_KEY_PRESS:{
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
-                              /*
-                              xcb_keysym_t      xcb_key_press_lookup_keysym   (xcb_key_symbols_t         *syms,
-                                  xcb_key_press_event_t      *event,
-                                  int                    col);
-                                  */
                               xcb_keysym_t sym = xcb_key_press_lookup_keysym(syms, k, 0);
-                              printf("%c",sym);
-                              buf[buf_idx++] = sym;
-                              if((char)sym == '\r') { // < For some reason the \n keycode translates to \r? Maybe its translating to \r\n but I'm only reading one of them
-                                printf("\n");
-                                fflush(stdout);
-                              }
+                              cprintscr(conn, &win, &fontgc_black, (char)sym); 
                               switch (k->detail){ 
                                 case 9: // < esc
                                   free(ev);
                                   goto post_event_loop;
-                                /*
-                                case 65: // < space, this works but how am i supposed to send a keypress event to the hidden window lol
-                                  if(is_hidden){
-                                    is_hidden = 0;
-                                    xcb_unmap_window(conn, win);
-                                  }else{
-                                    is_hidden = 1;
-                                    xcb_map_window(conn, win);
-                                  }
-                                  */
                               }
-                              printf("pressed: %d\n", k->detail);
                               break;
                          }
       case XCB_KEY_RELEASE: {
@@ -228,14 +205,12 @@ int main(int argc, char **argv){
                             }
       case XCB_BUTTON_PRESS: {
                                xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
-                               printf("button pushed @ {%d, %d}\n", b->event_x, b->event_y);
                                xcb_point_t point = {b->event_x, b->event_y};
                                push_point(&points, point);
                                break;
                              }
       case XCB_BUTTON_RELEASE: {
                                xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
-                               printf("button released @ {%d, %d}\n", b->event_x, b->event_y);
                                break;
                              }
 
@@ -289,6 +264,22 @@ update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle
   free(g_reply);
 }
 
+void
+cprintscr(xcb_connection_t *conn, 
+    xcb_drawable_t *win,
+    xcb_gcontext_t *fontgc,
+    const char c
+    ){
+    char w[2] = {c, '\0'};
+    if( c != '\r'){
+      xcb_cookie = xcb_image_text_8_checked(conn, 1, *win, *fontgc, cursor.x, cursor.y, w);
+      cursor.x += char_width;
+    }else{
+      cursor.x = MARGIN;
+      cursor.y += char_width + 4;
+    }
+}
+
 
 /*
  * Print line by line to the screen, unfinished, gets very slow
@@ -304,7 +295,7 @@ sprintscr(xcb_connection_t *conn,
     return;
   }
   char * textcpy = strdup(text);
-  int LINEHEIGHT = 8 + 2; //temporary hardcoded
+  int LINEHEIGHT = char_width + 2; //temporary hardcoded
   char *line = strtok(textcpy, "\n\r");
   while(line != NULL){
     xcb_cookie = xcb_image_text_8_checked(conn, strlen(line), *win, *fontgc, startx, starty, line);
@@ -350,12 +341,13 @@ init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *font_n
   xcb_query_font_reply_t *qfont_reply = xcb_query_font_reply(conn, qfont_cookie, &err);
   xcb_charinfo_t * font_char_info =  xcb_query_font_char_infos (qfont_reply);
   char_width = font_char_info->character_width;
+  //Ugly hack for now to correctly set the starting y pos
+  //TODO, clean this (entire function honestly) up
+  if(cursor.y < MARGIN + char_width + 2){
+    cursor.y = MARGIN + char_width + 2;
+  }
   
   free(qfont_reply);
-
-
-
-
   xcb_close_font(conn, f);
   return fontgc;
 }
