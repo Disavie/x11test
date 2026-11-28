@@ -25,12 +25,12 @@
 #define ARR_LEN(x) sizeof(x) / sizeof(x[0]);
 
 #define MARGIN 25
-#define NULL_POINT {-1, -1}
 
 /*
  *  https://xcb.freedesktop.org/tutorial/basicwindowsanddrawing/
  */
 static inline int min(int a, int b){ return a < b ? a : b; }
+static int char_width;
 
 struct m_point_arr {
   int cap;
@@ -54,7 +54,15 @@ static const int borderpx = 10;
 static const char *fname = "lucidasanstypewriter-8";
 static xcb_void_cookie_t xcb_cookie;
 static const char *winname = "poop window";
+typedef struct{
+  int x;
+  int y;
+}Cursor_t;
 
+static Cursor_t cursor = {
+  .x = MARGIN,
+  .y = MARGIN
+};
 
 int main(int argc, char **argv){
   xcb_connection_t *conn = xcb_connect(NULL, NULL);
@@ -86,6 +94,7 @@ int main(int argc, char **argv){
   uint32_t winvalues[2] = { screen->black_pixel, 
       XCB_EVENT_MASK_EXPOSURE |
       XCB_EVENT_MASK_VISIBILITY_CHANGE |
+      XCB_EVENT_MASK_RESIZE_REDIRECT |
       XCB_EVENT_MASK_BUTTON_PRESS |
       XCB_EVENT_MASK_BUTTON_RELEASE |
       XCB_EVENT_MASK_KEY_PRESS | 
@@ -180,11 +189,6 @@ int main(int argc, char **argv){
         const char * text = "Hello world! Space to toggle visibility, <ESC> to exit";
         xcb_cookie = xcb_image_text_8_checked(conn, strlen(text), win, fontgc, 0, 12, text);
         check_xcb_cookie(conn, xcb_cookie, "drawing text");
-
-
-
-
-
         break;
       case XCB_KEY_PRESS:{
                               xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
@@ -285,6 +289,10 @@ update_rects_geometry(xcb_connection_t *conn, xcb_drawable_t *win, xcb_rectangle
   free(g_reply);
 }
 
+
+/*
+ * Print line by line to the screen, unfinished, gets very slow
+ */
 void
 sprintscr(xcb_connection_t *conn,
     xcb_drawable_t *win,
@@ -307,24 +315,47 @@ sprintscr(xcb_connection_t *conn,
   free(textcpy);
 }
 
-
+/*
+ * Creates graphics context for a font
+ * Also sets global @char_width
+ * @param font_name font name
+ * @param color foreground
+ * ~@parma color background
+ *
+ */
 xcb_gcontext_t
 init_xcb_font_gc(xcb_connection_t *conn, xcb_drawable_t *win, const char *font_name, uint32_t col){
-
+  //Setup
   const xcb_setup_t *setup = xcb_get_setup(conn);
   xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
   xcb_screen_t *screen = iter.data;
   //Open a a font
   // Adding XBC_GC_FONT to the gc's valuemask allows it to draw fonts
   xcb_font_t f = xcb_generate_id(conn);
+
+  //Open the font
   xcb_cookie = xcb_open_font_checked(conn, f, strlen(font_name), font_name);
   check_xcb_cookie(conn, xcb_cookie, "opening font");
-
+  //Create GC for the font
   xcb_gcontext_t fontgc = xcb_generate_id(conn); 
   uint32_t gcmask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT;
-  uint32_t gcvalues[3] = { screen->black_pixel, screen->white_pixel , f};
+  uint32_t gcvalues[3] = { col, ~col , f};
+//  uint32_t gcvalues[3] = { screen->black_pixel, screen->white_pixel , f};
   xcb_cookie = xcb_create_gc_checked(conn, fontgc, *win, gcmask, gcvalues);
   check_xcb_cookie(conn, xcb_cookie, "create gc");
+
+  //Get font info
+  xcb_query_font_cookie_t qfont_cookie = xcb_query_font(conn, f);
+  xcb_generic_error_t *err;
+  xcb_query_font_reply_t *qfont_reply = xcb_query_font_reply(conn, qfont_cookie, &err);
+  xcb_charinfo_t * font_char_info =  xcb_query_font_char_infos (qfont_reply);
+  char_width = font_char_info->character_width;
+  
+  free(qfont_reply);
+
+
+
+
   xcb_close_font(conn, f);
   return fontgc;
 }
